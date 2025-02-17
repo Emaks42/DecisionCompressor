@@ -1,0 +1,124 @@
+import math
+from collections import Counter
+import pandas as pd
+import numpy as np
+
+
+class Node:
+    def __init__(self):
+        self.l = None
+        self.r = None
+        self.feature = None
+        self.threshold = -1
+        self.answer = None
+
+    def H(self, y):
+        c = Counter(y)
+        ans = 0
+        for x in c.keys():
+            pk = c[x] / len(y)
+            ans += pk * math.log(pk)
+        return -1 * ans
+
+    def Q(self, y, yl, yr):
+        return self.H(y) - (len(yl) / len(y)) * self.H(yl) - (len(yr) / len(y)) * self.H(yr)
+
+    def is_stop(self, y):
+        return len(Counter(y).keys()) <= 1
+
+    def fit(self, X, y):
+        if self.is_stop(y):
+            self.answer = Counter(y).most_common()[0][0]
+            return
+
+        max_q = -1
+        max_feature = None
+        max_threshold = -1
+
+        for feature in X.columns:
+            for threshold in np.unique(X[feature]):
+                left_cond = X[feature] <= threshold
+                right_cond = X[feature] > threshold
+                q = self.Q(y, y[left_cond], y[right_cond])
+                if q >= max_q:
+                    max_q = q
+                    max_feature = feature
+                    max_threshold = threshold
+
+        self.threshold = max_threshold
+        self.feature = max_feature
+
+        left_cond = X[self.feature] <= self.threshold
+        right_cond = X[self.feature] > self.threshold
+
+        self.l = Node()
+        self.r = Node()
+
+        self.l.fit(X[left_cond], y[left_cond])
+        self.r.fit(X[right_cond], y[right_cond])
+
+    def encode_to_bits(self, bit_size_lim):
+        if self.answer != None:
+            return "00" + (bit_size_lim - len(bin(self.answer)[2:])) * "0" + f"{self.answer:b}"
+        else:
+            if self.feature == "x":
+                return "01" + (bit_size_lim - len(bin(self.threshold)[2:])) * "0" + f"{self.threshold:b}"
+            else:
+                return "10" + (bit_size_lim - len(bin(self.threshold)[2:])) * "0" + f"{self.threshold:b}"
+
+
+class DecisionTree:
+    def __init__(self):
+        self.root = Node()
+
+    def fit(self, X, y):
+        self.root.fit(X,y)
+
+    def _print(self, n: Node, step=0):
+        print("  " * step + f"{n.answer} {n.feature} {n.threshold}")
+        if n.l:
+            self._print(n.l,step+1)
+        if n.r:
+            self._print(n.r,step+1)
+
+    def print_conditions(self):
+        self._print(self.root)
+
+    def _search(self, X, n: Node):
+        if n.answer != None:
+            return n.answer
+        if (X[n.feature] <= n.threshold):
+            return self._search(X, n.l)
+        else:
+            return self._search(X, n.r)
+
+    def count_all_nodes(self):
+        return self.count_nodes(self.root)
+
+    def count_nodes(self, n: Node):
+        if not (n.l or n.r):
+            return 1
+        else:
+            ans = 0
+            if n.r:
+                ans += self.count_nodes(n.r)
+            if n.l:
+                ans += self.count_nodes(n.l)
+        return ans
+
+    def predict_(self, X):
+        y = []
+        for index, row in X.iterrows():
+            y.append(self._search(row,self.root))
+        return pd.Series(y, index=X.index)
+
+    def encode_to_bits(self, bit_size_lim, n: Node):
+        if not (n.l or n.r):
+            return n.encode_to_bits(bit_size_lim)
+        else:
+            ans = n.encode_to_bits(bit_size_lim)
+            if n.r:
+                ans += self.encode_to_bits(bit_size_lim, n.r)
+            if n.l:
+                ans += self.encode_to_bits(bit_size_lim, n.l)
+            return ans
