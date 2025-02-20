@@ -4,6 +4,19 @@ import pandas as pd
 import numpy as np
 
 
+def monochrome_check(X, y):
+    X_ = y.reshape(((X.iloc[len(X)-1].values+1).reshape((2))) - ((X.iloc[0].values).reshape((2))))
+    for arr in X_:
+        edit_arr = arr - np.concatenate((np.array([arr[0]]),arr[:-1]))
+        if any([sum(edit_arr[i:i+2]) == 0 for i in np.arange(0,len(arr)-2)]):
+            return True
+    X_ = np.rot90(X_)
+    for arr in X_:
+        edit_arr = arr - np.concatenate((np.array([arr[0]]),arr[:-1]))
+        if any([sum(edit_arr[i:i+2]) == 0 for i in np.arange(0,len(arr)-2)]):
+            return True
+    return False
+
 class Node:
     def __init__(self):
         self.l = None
@@ -29,7 +42,10 @@ class Node:
     def fit(self, X, y):
         if self.is_stop(y):
             self.answer = Counter(y).most_common()[0][0]
-            return
+            return 0
+        if not monochrome_check(X, y) or len(y) <= 4:
+            self.answer = y
+            return len(y)
 
         max_q = -1
         max_feature = None
@@ -53,13 +69,18 @@ class Node:
 
         self.l = Node()
         self.r = Node()
+        ret = 0
+        ret = max(self.l.fit(X[left_cond], y[left_cond]), ret)
+        ret = max(self.r.fit(X[right_cond], y[right_cond]), ret)
+        return ret
 
-        self.l.fit(X[left_cond], y[left_cond])
-        self.r.fit(X[right_cond], y[right_cond])
-
-    def encode_to_bits(self, bit_size_lim):
-        if self.answer != None:
+    def encode_to_bits(self, bit_size_lim, arr_size_lim):
+        if type(self.answer) == np.uint64:
             return "00" + (bit_size_lim - len(bin(self.answer)[2:])) * "0" + f"{self.answer:b}"
+        elif type(self.answer) == np.ndarray:
+            return "11" + (arr_size_lim - len(bin(len(self.answer))[2:])) * "0" + f"{len(self.answer):b}" +  \
+                "".join([(bit_size_lim - len(bin(self.answer[i])[2:])) * "0" + f"{self.answer[i]:b}"
+                                       for i in range(len(self.answer))])
         else:
             if self.feature == "x":
                 return "01" + (bit_size_lim - len(bin(self.threshold)[2:])) * "0" + f"{self.threshold:b}"
@@ -70,9 +91,10 @@ class Node:
 class DecisionTree:
     def __init__(self):
         self.root = Node()
+        self.max_arr_size = 0
 
     def fit(self, X, y):
-        self.root.fit(X,y)
+        self.max_arr_size = self.root.fit(X, y)
 
     def _print(self, n: Node, step=0):
         print("  " * step + f"{n.answer} {n.feature} {n.threshold}")
@@ -84,13 +106,25 @@ class DecisionTree:
     def print_conditions(self):
         self._print(self.root)
 
-    def _search(self, X, n: Node):
-        if n.answer != None:
-            return n.answer
+    def _search(self, X, n: Node, lx, ly, rx, ry):
+        if type(n.answer) != type(None):
+            if type(n.answer) == int:
+                return n.answer
+            else:
+                X = X - np.array([lx, ly])
+                X = X.values
+                ans_ = (n.answer).reshape((rx-lx+1, ry-ly+1))
+                return ans_[X[0]][X[1]]
         if (X[n.feature] <= n.threshold):
-            return self._search(X, n.l)
+            if n.feature == "x":
+                return self._search(X, n.l, lx, ly, n.threshold, ry)
+            else:
+                return self._search(X, n.l, lx, ly, rx, n.threshold)
         else:
-            return self._search(X, n.r)
+            if n.feature == "x":
+                return self._search(X, n.r, n.threshold+1, ly, rx, ry)
+            else:
+                return self._search(X, n.r, lx, n.threshold+1, rx, ry)
 
     def count_all_nodes(self):
         return self.count_nodes(self.root)
@@ -106,19 +140,36 @@ class DecisionTree:
                 ans += self.count_nodes(n.l)
         return ans
 
-    def predict_(self, X):
+    def predict_(self, X, width, height):
         y = []
         for index, row in X.iterrows():
-            y.append(self._search(row,self.root))
+            y.append(self._search(row, self.root, 0, 0, width-1, height-1))
         return pd.Series(y, index=X.index)
 
-    def encode_to_bits(self, bit_size_lim, n: Node):
+    def encode_to_bits(self, bit_size_lim, arr_size_lim, n: Node):
         if not (n.l or n.r):
-            return n.encode_to_bits(bit_size_lim)
+            return n.encode_to_bits(bit_size_lim, arr_size_lim)
         else:
-            ans = n.encode_to_bits(bit_size_lim)
-            if n.r:
-                ans += self.encode_to_bits(bit_size_lim, n.r)
+            ans = n.encode_to_bits(bit_size_lim, arr_size_lim)
             if n.l:
-                ans += self.encode_to_bits(bit_size_lim, n.l)
+                ans += self.encode_to_bits(bit_size_lim, arr_size_lim, n.l)
+            if n.r:
+                ans += self.encode_to_bits(bit_size_lim, arr_size_lim, n.r)
             return ans
+
+    def get_splitting_array_tree(self, width, height):
+        arr = self._get_splitting_array(width, height, self.root)
+        ans = [list(arr[i:i+5]) for i in range(0, len(arr), 5)]
+        return ans
+
+    def _get_splitting_array(self, right_x, down_y,  n: Node, left_x=0, top_y=0):
+        if not (n.l or n.r):
+            return [top_y, right_x, down_y, left_x, n.answer]
+        else:
+            if n.feature == "x":
+                return self._get_splitting_array(n.threshold, down_y, n.l, left_x, top_y) +\
+                    self._get_splitting_array(right_x, down_y, n.r, n.threshold+1, top_y)
+            else:
+                return self._get_splitting_array(right_x, n.threshold, n.l, left_x, top_y) + \
+                    self._get_splitting_array(right_x, down_y, n.r, left_x, n.threshold+1)
+
