@@ -1,11 +1,8 @@
 # загрузка изображений
-import functools
-
 from PIL import Image
 from DTC import *
-input_ = 'alpha.bmp'
-arr = np.asarray(Image.open("pictures/" + input_),dtype=np.uint64)
-print(arr)
+input_ = 'test_.png'
+arr = np.asarray(Image.open("pictures/" + input_), dtype=np.uint64)
 
 # приведение к виду обучающих данных
 a = np.arange(0, arr.shape[0], 1)
@@ -21,7 +18,7 @@ else:
 im_ = list(np.unique(arr_))
 y = arr_
 for i in np.arange(len(im_)):
-  np.place(y, y == im_[i],[i])
+  np.place(y, y == im_[i], [i])
 print(y, len(im_))
 
 # переобучение
@@ -31,27 +28,31 @@ root = DecisionTree()
 root.fit(df, y)
 root.print_conditions()
 print(root.count_all_nodes())
+splitting_ = root.get_splitting_array_tree(len(arr[0]), len(arr))
 
 # сохранение данных в файл
-file = open("compressed/" + input_.split(".")[0]+".dtcc", "wb")
+file = open("compressed/" + input_.split(".")[0]+".dtcc", "w", encoding="cp855")
 width = len(arr[0]).to_bytes(2)
 height = len(arr).to_bytes(2)
 col_cou = (len(im_)*2 + (1 if len(arr[0][0]) == 4 else 0)).to_bytes(4)
-file.write(width)
-file.write(height)
-file.write(col_cou)
+file.write(width.decode(encoding="cp855"))
+file.write(height.decode(encoding="cp855"))
+file.write(col_cou.decode(encoding="cp855"))
 colors = []
 for i in im_:
     colors.append((int(i)).to_bytes(len(arr[0][0]), byteorder="big"))
-file.write(b"".join(colors))
+file.write((b"".join(colors)).decode(encoding="cp855"))
 bit_size_lim = max(len(bin(len(arr))[2:]), len(bin(len(arr[0]))[2:]), len(bin(len(im_))[2:]))
-tree = root.encode_to_bits(bit_size_lim, root.root)
+arr_size_lim = len(bin(root.max_arr_size)[2:])
+file.write((arr_size_lim.to_bytes(4)).decode(encoding="cp855"))
+print(bit_size_lim, arr_size_lim)
+tree = root.encode_to_bits(bit_size_lim, arr_size_lim, root.root)
 print(tree)
 if len(tree) % 16 != 0:
     tree += "0" * (len(tree) % 16)
 byted_tree = b""
 for sig in range(0,len(tree)-16,16):
-    o = int(tree[sig:sig+16],2)
+    o = int(tree[sig:sig+16], 2)
     byted_tree += o.to_bytes(2)
-file.write(byted_tree)
+file.write(byted_tree.decode(encoding="cp855"))
 file.close()
